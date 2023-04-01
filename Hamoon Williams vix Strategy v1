@@ -1,0 +1,61 @@
+//@version=4
+strategy("Hamoon Williams vix Strategy v1", overlay=true)
+
+// Williams Vix Fix Criteria
+pd = input(22, title="LookBack Period Standard Deviation High")
+bbl = input(20, title="Bolinger Band Length")
+mult = input(2.0    , minval=1, maxval=5, title="Bollinger Band Standard Devaition Up")
+lb = input(50  , title="Look Back Period Percentile High")
+ph = input(.85, title="Highest Percentile - 0.90=90%, 0.95=95%, 0.99=99%")
+
+wvf = ((highest(close, pd)-low)/(highest(close, pd)))*100
+sDev = mult * stdev(wvf, bbl)
+midLine = sma(wvf, bbl)
+lowerBand = midLine - sDev
+upperBand = midLine + sDev
+rangeHigh = (highest(wvf, lb)) * ph
+
+buySignal = crossover(rsi(close, 14), sma(rsi(close, 14), 7)) and wvf > -4
+sellSignal = false
+
+buyPrice = 0.0
+stopLossPrice = 0.0
+takeProfitPrice = 0.0
+stopLossPips = 40
+takeProfitPips = 10
+totalProfit = 0.0
+totalLoss = 0.0
+maxProfit = 0.0
+
+if (buySignal)
+    strategy.entry("Buy", strategy.long)
+    buyPrice := close
+    stopLossPrice := buyPrice - stopLossPips * syminfo.mintick
+    takeProfitPrice := buyPrice + takeProfitPips * syminfo.mintick
+    totalProfit := 0.0
+    totalLoss := 0.0
+    maxProfit := 0.0
+    
+if (strategy.position_size > 0)
+    if (close > takeProfitPrice)
+        strategy.exit("Close TP", profit=takeProfitPrice - buyPrice, comment="Take Profit")
+        totalProfit := totalProfit + takeProfitPrice - buyPrice
+        maxProfit := max(maxProfit, totalProfit)
+    else if (close < stopLossPrice)
+        strategy.exit("Close SL", loss=stopLossPrice - buyPrice, comment="Stop Loss")
+        totalLoss := totalLoss + stopLossPrice - buyPrice
+    else if (totalProfit >= 4 * abs(totalLoss) and close > buyPrice + syminfo.mintick)
+        strategy.exit("Close TP", profit=close - buyPrice, comment="Additional Take Profit")
+        totalProfit := totalProfit + close - buyPrice
+        maxProfit := max(maxProfit, totalProfit)
+    else if (totalLoss >= 2 * maxProfit and close < buyPrice - syminfo.mintick)
+        strategy.exit("Close SL", loss=buyPrice - close, comment="Additional Stop Loss")
+        totalLoss := totalLoss + buyPrice - close
+
+plot(wvf, title="Williams Vix Fix")
+plot(upperBand, title="Upper Band")
+plot(lowerBand, title="Lower Band")
+
+// Alerts
+alertcondition(buySignal, title="Buy Signal")
+alertcondition(sellSignal, title="Sell Signal")
