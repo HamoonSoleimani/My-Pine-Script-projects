@@ -1,0 +1,365 @@
+//@version=6
+strategy("🔥 Quantum Grid Fusion Strategy v6 🔥", 
+         shorttitle="QGF-v6", 
+         overlay=true, 
+         initial_capital=10000, 
+         default_qty_type=strategy.percent_of_equity, 
+         default_qty_value=2, 
+         pyramiding=50, 
+         calc_on_every_tick=false,
+         calc_on_order_fills=true,
+         commission_type=strategy.commission.percent,
+         commission_value=0.075,
+         slippage=2)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🎯 ADVANCED INPUT CONFIGURATION PANEL
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Williams VIX Fix Enhanced Parameters
+g1 = "🌟 Williams VIX Fix Configuration"
+vix_lookback = input.int(22, "VIX Lookback Period", minval=10, maxval=100, group=g1, tooltip="Period for calculating VIX Fix standard deviation")
+bb_length = input.int(20, "Bollinger Band Length", minval=10, maxval=50, group=g1)
+bb_mult = input.float(2.0, "BB Standard Deviation", minval=0.5, maxval=5.0, step=0.1, group=g1)
+percentile_lookback = input.int(50, "Percentile Lookback", minval=20, maxval=200, group=g1)
+percentile_threshold = input.float(0.85, "Percentile Threshold", minval=0.5, maxval=0.99, step=0.01, group=g1)
+vix_smoothing = input.int(3, "VIX Smoothing", minval=1, maxval=10, group=g1, tooltip="EMA smoothing for VIX signals")
+
+// Multi-Timeframe Analysis
+g2 = "📊 Multi-Timeframe Analysis"
+enable_mtf = input.bool(true, "Enable Multi-Timeframe", group=g2)
+htf_timeframe = input.timeframe("60", "Higher Timeframe", group=g2)
+ltf_timeframe = input.timeframe("5", "Lower Timeframe", group=g2)
+mtf_weight = input.float(0.3, "MTF Signal Weight", minval=0.1, maxval=0.9, step=0.1, group=g2)
+
+// Advanced Grid System
+g3 = "🎛️ Adaptive Grid Configuration"
+enable_adaptive_grid = input.bool(true, "Enable Adaptive Grid", group=g3)
+base_grid_size = input.float(0.5, "Base Grid Size (%)", minval=0.1, maxval=5.0, step=0.1, group=g3)
+volatility_multiplier = input.float(1.5, "Volatility Grid Multiplier", minval=0.5, maxval=3.0, step=0.1, group=g3)
+max_grid_levels = input.int(20, "Maximum Grid Levels", minval=5, maxval=50, group=g3)
+grid_expansion_factor = input.float(1.2, "Grid Expansion Factor", minval=1.0, maxval=2.0, step=0.1, group=g3)
+
+// Risk Management System
+g4 = "🛡️ Advanced Risk Management"
+max_drawdown_pct = input.float(15.0, "Max Drawdown %", minval=5.0, maxval=50.0, step=1.0, group=g4)
+position_sizing_mode = input.string("Adaptive", "Position Sizing", options=["Fixed", "Adaptive", "Kelly"], group=g4)
+risk_per_trade = input.float(1.0, "Risk Per Trade %", minval=0.1, maxval=5.0, step=0.1, group=g4)
+enable_trailing_stop = input.bool(true, "Enable Trailing Stop", group=g4)
+trailing_stop_pct = input.float(2.0, "Trailing Stop %", minval=0.5, maxval=10.0, step=0.1, group=g4)
+
+// Market Regime Detection
+g5 = "🌊 Market Regime Detection"
+enable_regime_filter = input.bool(true, "Enable Regime Filter", group=g5)
+trend_length = input.int(50, "Trend Detection Length", minval=20, maxval=200, group=g5)
+volatility_length = input.int(20, "Volatility Length", minval=10, maxval=100, group=g5)
+correlation_length = input.int(30, "Correlation Length", minval=10, maxval=100, group=g5)
+
+// Advanced Entry Conditions
+g6 = "🚀 Multi-Signal Entry System"
+enable_rsi_confluence = input.bool(true, "RSI Confluence", group=g6)
+rsi_length = input.int(14, "RSI Length", minval=5, maxval=50, group=g6)
+rsi_ma_length = input.int(7, "RSI MA Length", minval=3, maxval=20, group=g6)
+enable_macd_filter = input.bool(true, "MACD Filter", group=g6)
+macd_fast = input.int(12, "MACD Fast", minval=5, maxval=50, group=g6)
+macd_slow = input.int(26, "MACD Slow", minval=10, maxval=100, group=g6)
+macd_signal = input.int(9, "MACD Signal", minval=3, maxval=20, group=g6)
+
+// Visual Configuration
+g7 = "🎨 Visual Configuration"
+show_grid_lines = input.bool(true, "Show Grid Lines", group=g7)
+show_signals = input.bool(true, "Show Entry Signals", group=g7)
+show_regime = input.bool(true, "Show Market Regime", group=g7)
+grid_transparency = input.int(80, "Grid Transparency", minval=0, maxval=100, group=g7)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🧮 ADVANCED MATHEMATICAL FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Enhanced Williams VIX Fix with multiple smoothing options
+williams_vix_fix(length, bb_len, multiplier, smooth_len) =>
+    wvf_raw = ((ta.highest(close, length) - low) / ta.highest(close, length)) * 100
+    wvf_smooth = ta.ema(wvf_raw, smooth_len)
+    std_dev = multiplier * ta.stdev(wvf_smooth, bb_len)
+    mid_line = ta.sma(wvf_smooth, bb_len)
+    upper_band = mid_line + std_dev
+    lower_band = mid_line - std_dev
+    [wvf_smooth, upper_band, lower_band, mid_line]
+
+// Adaptive ATR-based grid sizing
+adaptive_grid_size(base_size, vol_mult, atr_len) =>
+    atr_value = ta.atr(atr_len)
+    atr_pct = (atr_value / close) * 100
+    adaptive_size = base_size * (1 + (atr_pct * vol_mult / 100))
+    math.min(adaptive_size, base_size * 3) // Cap at 3x base size
+
+// Advanced market regime detection
+market_regime(trend_len, vol_len) =>
+    // Trend component
+    ma_fast = ta.ema(close, trend_len / 2)
+    ma_slow = ta.ema(close, trend_len)
+    trend_score = (ma_fast - ma_slow) / ma_slow * 100
+    
+    // Volatility component
+    returns = ta.change(close) / close[1]
+    volatility = ta.stdev(returns, vol_len) * math.sqrt(252) * 100
+    vol_ma = ta.sma(volatility, vol_len)
+    vol_score = (volatility - vol_ma) / vol_ma
+    
+    // Regime classification
+    regime = trend_score > 1 and vol_score < 0.5 ? 1 : // Trending Low Vol
+             trend_score > 1 and vol_score >= 0.5 ? 2 : // Trending High Vol
+             trend_score <= 1 and trend_score >= -1 and vol_score < 0.5 ? 3 : // Sideways Low Vol
+             trend_score <= 1 and trend_score >= -1 and vol_score >= 0.5 ? 4 : // Sideways High Vol
+             trend_score < -1 and vol_score < 0.5 ? 5 : // Declining Low Vol
+             6 // Declining High Vol
+    
+    [regime, trend_score, vol_score, volatility]
+
+// Kelly Criterion position sizing
+kelly_position_size(win_rate, avg_win, avg_loss, capital) =>
+    if avg_loss > 0
+        kelly_pct = win_rate - ((1 - win_rate) * avg_win / avg_loss)
+        math.max(math.min(kelly_pct * 0.25, 0.05), 0.01) // Conservative Kelly with 25% scaling
+    else
+        0.02
+
+// Dynamic correlation analysis
+price_correlation(length) =>
+    src1 = close
+    src2 = ta.ema(close, length)
+    correlation = ta.correlation(src1, src2, length)
+    correlation
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🔍 INDICATOR CALCULATIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Enhanced Williams VIX Fix
+[wvf, wvf_upper, wvf_lower, wvf_mid] = williams_vix_fix(vix_lookback, bb_length, bb_mult, vix_smoothing)
+wvf_percentile = ta.percentile_linear_interpolation(wvf, percentile_lookback, percentile_threshold * 100)
+
+// Multi-timeframe VIX analysis
+htf_wvf = enable_mtf ? request.security(syminfo.tickerid, htf_timeframe, wvf, lookahead=barmerge.lookahead_off) : wvf
+ltf_wvf = enable_mtf ? request.security(syminfo.tickerid, ltf_timeframe, wvf, lookahead=barmerge.lookahead_off) : wvf
+
+// Market regime detection
+[regime, trend_score, vol_score, current_vol] = market_regime(trend_length, volatility_length)
+
+// Advanced technical indicators
+rsi_value = ta.rsi(close, rsi_length)
+rsi_ma = ta.sma(rsi_value, rsi_ma_length)
+[macd_line, signal_line, hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// Adaptive grid sizing
+current_grid_size = enable_adaptive_grid ? 
+                   adaptive_grid_size(base_grid_size, volatility_multiplier, 14) : 
+                   base_grid_size
+
+// Correlation analysis
+price_correl = price_correlation(correlation_length)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 📊 SIGNAL GENERATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Primary VIX signal
+vix_signal = wvf > wvf_upper and wvf > wvf_percentile
+
+// Multi-timeframe confirmation
+mtf_signal = enable_mtf ? (htf_wvf > ta.ema(htf_wvf, 5) and ltf_wvf > wvf_lower) : true
+
+// RSI confluence signal
+rsi_signal = enable_rsi_confluence ? (ta.crossover(rsi_value, rsi_ma) and rsi_value < 70) : true
+
+// MACD filter
+macd_signal_active = enable_macd_filter ? (macd_line > signal_line and hist > hist[1]) : true
+
+// Market regime filter
+regime_filter = enable_regime_filter ? (regime == 1 or regime == 3 or regime == 4) : true
+
+// Volatility confirmation
+vol_confirmation = current_vol > ta.sma(current_vol, 20) * 0.8 // At least 80% of average volatility
+
+// Combined entry signal
+entry_signal = vix_signal and mtf_signal and rsi_signal and macd_signal_active and regime_filter and vol_confirmation
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 💼 ADVANCED POSITION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Position sizing calculation
+var float win_rate = 0.5
+var float avg_win = 0.0
+var float avg_loss = 0.0
+var int total_trades = 0
+var int winning_trades = 0
+
+position_size = position_sizing_mode == "Fixed" ? risk_per_trade / 100 : position_sizing_mode == "Adaptive" ? math.min(risk_per_trade / 100 * (1 + vol_score), 0.05) : position_sizing_mode == "Kelly" ? kelly_position_size(win_rate, avg_win, avg_loss, strategy.equity) : risk_per_trade / 100
+
+// Grid level tracking
+var array<float> grid_levels = array.new<float>()
+var array<float> grid_quantities = array.new<float>()
+var float base_price = na
+var int active_positions = 0
+
+// Initialize base price on first entry
+if entry_signal and strategy.position_size == 0
+    base_price := close
+    array.clear(grid_levels)
+    array.clear(grid_quantities)
+    active_positions := 0
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🎯 DYNAMIC GRID STRATEGY LOGIC
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate grid levels dynamically
+if not na(base_price) and strategy.position_size >= 0
+    for i = 1 to max_grid_levels
+        grid_distance = current_grid_size * math.pow(grid_expansion_factor, i - 1)
+        buy_level = base_price * (1 - grid_distance / 100)
+        sell_level = base_price * (1 + grid_distance / 100)
+        
+        // Add buy levels below current price
+        if close <= buy_level and i <= max_grid_levels / 2
+            if not array.includes(grid_levels, buy_level)
+                array.push(grid_levels, buy_level)
+                quantity = position_size * strategy.equity / buy_level
+                array.push(grid_quantities, quantity)
+        
+        // Add sell levels above current price  
+        if close >= sell_level and strategy.position_size > 0
+            if not array.includes(grid_levels, sell_level)
+                array.push(grid_levels, sell_level)
+                array.push(grid_quantities, -position_size * strategy.equity / sell_level)
+
+// Execute grid orders
+if array.size(grid_levels) > 0
+    for i = 0 to array.size(grid_levels) - 1
+        level = array.get(grid_levels, i)
+        qty = array.get(grid_quantities, i)
+        
+        if qty > 0 and close <= level and active_positions < max_grid_levels
+            strategy.entry("Grid_Buy_" + str.tostring(i), strategy.long, 
+                          qty=qty, limit=level, comment="Grid Buy @ " + str.tostring(level))
+            active_positions += 1
+        
+        else if qty < 0 and close >= level and strategy.position_size > 0
+            strategy.close("Grid_Buy_" + str.tostring(i), qty=math.abs(qty), comment="Grid Sell @ " + str.tostring(level))
+
+// Initial entry on signal
+if entry_signal and strategy.position_size == 0
+    initial_qty = position_size * strategy.equity / close
+    strategy.entry("Initial_Entry", strategy.long, qty=initial_qty, 
+                  comment="VIX Signal Entry")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🛡️ RISK MANAGEMENT SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate current drawdown
+var float peak_equity = 0.0
+current_equity = strategy.equity
+if current_equity > peak_equity
+    peak_equity := current_equity
+current_drawdown = peak_equity > 0 ? (current_equity - peak_equity) / peak_equity * 100 : 0.0
+
+// Emergency stop on max drawdown
+if math.abs(current_drawdown) >= max_drawdown_pct
+    strategy.close_all(comment="Max Drawdown Stop")
+    array.clear(grid_levels)
+    array.clear(grid_quantities)
+    base_price := na
+    active_positions := 0
+
+// Trailing stop implementation
+var float trailing_stop_price = na
+if enable_trailing_stop and strategy.position_size > 0
+    if na(trailing_stop_price) or close > nz(trailing_stop_price) + (close * trailing_stop_pct / 100)
+        trailing_stop_price := close * (1 - trailing_stop_pct / 100)
+    
+    if close <= trailing_stop_price
+        strategy.close_all(comment="Trailing Stop")
+        trailing_stop_price := na
+
+// Market close protection (if needed for specific markets)
+is_market_close = hour >= 15 and minute >= 45 // Adjust for your market
+if is_market_close and strategy.position_size > 0
+    strategy.close_all(comment="Market Close")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 📈 PERFORMANCE TRACKING
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Update performance metrics
+if strategy.closedtrades > total_trades
+    total_trades := strategy.closedtrades
+    winning_trades := strategy.wintrades
+    win_rate := winning_trades / total_trades
+    avg_win := strategy.grossprofit / strategy.wintrades
+    avg_loss := math.abs(strategy.grossloss / strategy.losstrades)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 🎨 ADVANCED VISUALIZATION
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Williams VIX Fix plots
+plot(wvf, title="Williams VIX Fix", color=color.new(color.blue, 0), linewidth=2)
+plot(wvf_upper, title="VIX Upper Band", color=color.new(color.red, 50), linewidth=1)
+plot(wvf_lower, title="VIX Lower Band", color=color.new(color.green, 50), linewidth=1)
+plot(wvf_mid, title="VIX Middle Line", color=color.new(color.gray, 70), linewidth=1)
+plot(wvf_percentile, title="VIX Percentile", color=color.new(color.orange, 30), linewidth=1, style=plot.style_stepline)
+
+// Market regime visualization
+regime_color = regime == 1 ? color.new(color.green, 90) :
+               regime == 2 ? color.new(color.yellow, 90) :
+               regime == 3 ? color.new(color.blue, 90) :
+               regime == 4 ? color.new(color.purple, 90) :
+               regime == 5 ? color.new(color.red, 90) :
+               color.new(color.black, 90)
+
+bgcolor(show_regime ? regime_color : na, title="Market Regime")
+
+// Grid level visualization
+if show_grid_lines and not na(base_price)
+    for i = 1 to math.min(max_grid_levels, 10) // Limit visual grid lines
+        grid_distance = current_grid_size * math.pow(grid_expansion_factor, i - 1)
+        buy_level = base_price * (1 - grid_distance / 100)
+        sell_level = base_price * (1 + grid_distance / 100)
+        
+        line.new(bar_index - 50, buy_level, bar_index, buy_level, color=color.new(color.green, grid_transparency), style=line.style_dashed, width=1)
+        line.new(bar_index - 50, sell_level, bar_index, sell_level, color=color.new(color.red, grid_transparency), style=line.style_dashed, width=1)
+
+// Entry signal markers
+plotshape(show_signals and entry_signal, title="Entry Signal", location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+
+// Position size indicator
+var table position_table = table.new(position.top_right, 4, 8, bgcolor=color.new(color.white, 80), border_width=1)
+if barstate.islast
+    table.cell(position_table, 0, 0, "Metric", text_color=color.black, bgcolor=color.new(color.gray, 50))
+    table.cell(position_table, 1, 0, "Value", text_color=color.black, bgcolor=color.new(color.gray, 50))
+    table.cell(position_table, 0, 1, "Position Size", text_color=color.black)
+    table.cell(position_table, 1, 1, str.tostring(strategy.position_size, "#.##"), text_color=color.black)
+    table.cell(position_table, 0, 2, "Unrealized P&L", text_color=color.black)
+    table.cell(position_table, 1, 2, str.tostring(strategy.openprofit, "#.##"), text_color=strategy.openprofit >= 0 ? color.green : color.red)
+    table.cell(position_table, 0, 3, "Win Rate", text_color=color.black)
+    table.cell(position_table, 1, 3, str.tostring(win_rate * 100, "#.#") + "%", text_color=color.black)
+    table.cell(position_table, 0, 4, "Active Grids", text_color=color.black)
+    table.cell(position_table, 1, 4, str.tostring(active_positions), text_color=color.black)
+    table.cell(position_table, 0, 5, "Market Regime", text_color=color.black)
+    regime_text = regime == 1 ? "Trend↑Low Vol" : regime == 2 ? "Trend↑High Vol" : regime == 3 ? "Side↔Low Vol" : regime == 4 ? "Side↔High Vol" : regime == 5 ? "Trend↓Low Vol" : "Trend↓High Vol"
+    table.cell(position_table, 1, 5, regime_text, text_color=color.black)
+    table.cell(position_table, 0, 6, "Current Vol", text_color=color.black)
+    table.cell(position_table, 1, 6, str.tostring(current_vol, "#.##") + "%", text_color=color.black)
+    table.cell(position_table, 0, 7, "Grid Size", text_color=color.black)
+    table.cell(position_table, 1, 7, str.tostring(current_grid_size, "#.##") + "%", text_color=color.black)
+
+// Alert conditions
+alertcondition(entry_signal, title="VIX Grid Entry Signal", message="🚀 Quantum Grid Fusion: Entry signal triggered")
+alertcondition(math.abs(current_drawdown) >= max_drawdown_pct * 0.8, title="High Drawdown Warning", message="⚠️ Quantum Grid Fusion: Approaching maximum drawdown limit")
+alertcondition(regime != regime[1], title="Market Regime Change", message="🌊 Quantum Grid Fusion: Market regime changed")
+
+// Performance summary
+if barstate.islastconfirmedhistory
+    log.info("Strategy loaded successfully! 🚀" + "\n" + "Total Trades: " + str.tostring(total_trades) + "\n" + "Win Rate: " + str.tostring(win_rate * 100, "#.#") + "%" + "\n" + "Current Regime: " + str.tostring(regime))
